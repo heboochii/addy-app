@@ -1,0 +1,23 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const ctx={window:{}};vm.runInNewContext(fs.readFileSync('web/journey-model.js','utf8'),ctx);const m=ctx.window.AddyJourneyModel;
+const base={mode:'move',housing:'rent',zone:'other',origin:'unsure',license:'unsure',needs:[]};const ids=c=>m.eligible({...base,...c}).map(t=>t.id);
+assert(ids({}).includes('lease-register'));assert(!ids({}).includes('lease-adgm'));
+assert(ids({zone:'adgm'}).includes('lease-adgm'));assert(!ids({zone:'adgm'}).includes('lease-register'));
+assert(ids({zone:'unsure'}).includes('lease-unknown'));assert(!ids({zone:'unsure'}).includes('lease-register'));
+assert(ids({housing:'buy'}).includes('owner-title'));assert(!ids({housing:'buy'}).includes('lease-register'));
+assert.equal(m.eligible({...base,housing:'buy',zone:'adgm'}).find(t=>t.id==='owner-title').source,'adgm');
+assert(ids({housing:'offplan'}).includes('offplan'));assert(!ids({housing:'offplan'}).includes('power'));assert(!ids({housing:'offplan'}).includes('moving-access'));
+assert(ids({housing:'provided'}).includes('provided-home'));assert(!ids({housing:'provided'}).includes('lease-register'));
+assert.equal(ids({mode:'settled'}).length,0);assert(ids({mode:'settled',needs:['school']}).includes('school'));
+assert(!ids({mode:'business',needs:['school','home']}).includes('school'));assert(!ids({mode:'business',needs:['home']}).includes('home-route'));
+assert(ids({mode:'business',origin:'uae',license:'yes'}).includes('biz-uae'));assert(!ids({mode:'business',origin:'uae',license:'yes'}).includes('biz-new'));
+assert(ids({mode:'business',origin:'overseas',license:'no'}).includes('biz-foreign'));assert(ids({mode:'business',origin:'new',license:'no'}).includes('biz-new'));
+assert(ids({mode:'business',origin:'ad',license:'yes'}).includes('biz-existing'));
+const s=m.defaults();s.context={...base};s.records['home-route']={status:'done',help:true,docs:{brief:true}};assert.equal(m.progress(s).done,1);assert.equal(m.record(s,'home-route').status,'done');
+s.records['home-route'].status='todo';assert.equal(m.progress(s).done,0);assert(m.record(s,'home-route').help);
+const n=m.normalize(JSON.parse(JSON.stringify(s)));assert.equal(n.records['home-route'].status,'todo');assert(n.records['home-route'].help);
+assert.equal(m.normalize(null).context.mode,'');assert.equal(m.normalize({version:100}).context.mode,'');
+const bad=m.normalize({version:1,context:{mode:'evil',needs:['school','bad','school']},records:{'home-route':{status:'approved',docs:{brief:true,passport:'SECRET'},provider:'javascript:',due:'malformed'}}});assert.equal(bad.context.mode,'');assert.equal(bad.context.needs.length,1);assert.equal(bad.records['home-route'].status,'todo');assert.equal(bad.records['home-route'].docs.passport,undefined);
+assert.equal(new Set(m.tasks.map(t=>t.id)).size,m.tasks.length);for(const t of m.tasks){for(const lang of ['en','ar','fr'])for(const field of ['title','why','next'])assert(t[field][lang],t.id+lang+field);assert(m.sources[t.source]);assert(m.sources[t.source][1].startsWith('https://'));for(const dep of t.deps)assert(m.tasks.some(t=>t.id===dep));}
+assert(ids({mode:'business',license:'unsure'}).includes('biz-verify'));assert(!ids({mode:'business',license:'unsure'}).includes('biz-new'));assert.equal(m.eligible({...base,housing:'offplan',zone:'adgm'}).find(t=>t.id==='offplan').source,'adgm');
+console.log('PASS: journey logic, schema, isolation, multilingual and source assertions. Catalog:',m.tasks.length,'tasks.');
